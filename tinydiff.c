@@ -2,8 +2,8 @@
 #include <math.h>
 #include <string.h>
 
-#define TINYDIFF_MAX_VARS 256
-#define TINYDIFF_NAME_LEN 16
+#define TINYDIFF_MAX_VARS 512
+#define TINYDIFF_NAME_LEN 128
 
 typedef enum {
     TINYDIFF_OP_INPUT,
@@ -17,7 +17,10 @@ typedef enum {
     TINYDIFF_OP_EXP,
     TINYDIFF_OP_LOG,
     TINYDIFF_OP_POW,
-    TINYDIFF_OP_NEG
+    TINYDIFF_OP_NEG,
+    TINYDIFF_OP_TANH,
+    TINYDIFF_OP_RELU,
+    TINYDIFF_OP_SIGMOID
 } tinydiff_op;
 
 typedef struct tinydiff_var {
@@ -77,13 +80,13 @@ int tinydiff_add(int a, int b) {
     tinydiff_var *vb = &__td_graph.vars[b];
     tinydiff_var *v = &__td_graph.vars[__td_graph.count];
     v->id = __td_graph.count;
-    snprintf(v->name, TINYDIFF_NAME_LEN, "(%s+%s)", va->name, vb->name);
     v->value = va->value + vb->value;
     v->grad = 0.0;
     v->op = TINYDIFF_OP_ADD;
     v->left = a;
     v->right = b;
     v->visited = 0;
+    v->name[0] = '\0';
     return __td_graph.count++;
 }
 
@@ -92,13 +95,13 @@ int tinydiff_sub(int a, int b) {
     tinydiff_var *vb = &__td_graph.vars[b];
     tinydiff_var *v = &__td_graph.vars[__td_graph.count];
     v->id = __td_graph.count;
-    snprintf(v->name, TINYDIFF_NAME_LEN, "(%s-%s)", va->name, vb->name);
     v->value = va->value - vb->value;
     v->grad = 0.0;
     v->op = TINYDIFF_OP_SUB;
     v->left = a;
     v->right = b;
     v->visited = 0;
+    v->name[0] = '\0';
     return __td_graph.count++;
 }
 
@@ -107,13 +110,13 @@ int tinydiff_mul(int a, int b) {
     tinydiff_var *vb = &__td_graph.vars[b];
     tinydiff_var *v = &__td_graph.vars[__td_graph.count];
     v->id = __td_graph.count;
-    snprintf(v->name, TINYDIFF_NAME_LEN, "(%s*%s)", va->name, vb->name);
     v->value = va->value * vb->value;
     v->grad = 0.0;
     v->op = TINYDIFF_OP_MUL;
     v->left = a;
     v->right = b;
     v->visited = 0;
+    v->name[0] = '\0';
     return __td_graph.count++;
 }
 
@@ -122,13 +125,13 @@ int tinydiff_div(int a, int b) {
     tinydiff_var *vb = &__td_graph.vars[b];
     tinydiff_var *v = &__td_graph.vars[__td_graph.count];
     v->id = __td_graph.count;
-    snprintf(v->name, TINYDIFF_NAME_LEN, "(%s/%s)", va->name, vb->name);
     v->value = va->value / vb->value;
     v->grad = 0.0;
     v->op = TINYDIFF_OP_DIV;
     v->left = a;
     v->right = b;
     v->visited = 0;
+    v->name[0] = '\0';
     return __td_graph.count++;
 }
 
@@ -136,13 +139,13 @@ int tinydiff_sin(int a) {
     tinydiff_var *va = &__td_graph.vars[a];
     tinydiff_var *v = &__td_graph.vars[__td_graph.count];
     v->id = __td_graph.count;
-    snprintf(v->name, TINYDIFF_NAME_LEN, "sin(%s)", va->name);
     v->value = sin(va->value);
     v->grad = 0.0;
     v->op = TINYDIFF_OP_SIN;
     v->left = a;
     v->right = -1;
     v->visited = 0;
+    v->name[0] = '\0';
     return __td_graph.count++;
 }
 
@@ -150,13 +153,13 @@ int tinydiff_cos(int a) {
     tinydiff_var *va = &__td_graph.vars[a];
     tinydiff_var *v = &__td_graph.vars[__td_graph.count];
     v->id = __td_graph.count;
-    snprintf(v->name, TINYDIFF_NAME_LEN, "cos(%s)", va->name);
     v->value = cos(va->value);
     v->grad = 0.0;
     v->op = TINYDIFF_OP_COS;
     v->left = a;
     v->right = -1;
     v->visited = 0;
+    v->name[0] = '\0';
     return __td_graph.count++;
 }
 
@@ -164,13 +167,13 @@ int tinydiff_exp(int a) {
     tinydiff_var *va = &__td_graph.vars[a];
     tinydiff_var *v = &__td_graph.vars[__td_graph.count];
     v->id = __td_graph.count;
-    snprintf(v->name, TINYDIFF_NAME_LEN, "exp(%s)", va->name);
     v->value = exp(va->value);
     v->grad = 0.0;
     v->op = TINYDIFF_OP_EXP;
     v->left = a;
     v->right = -1;
     v->visited = 0;
+    v->name[0] = '\0';
     return __td_graph.count++;
 }
 
@@ -178,13 +181,13 @@ int tinydiff_log(int a) {
     tinydiff_var *va = &__td_graph.vars[a];
     tinydiff_var *v = &__td_graph.vars[__td_graph.count];
     v->id = __td_graph.count;
-    snprintf(v->name, TINYDIFF_NAME_LEN, "log(%s)", va->name);
     v->value = log(va->value);
     v->grad = 0.0;
     v->op = TINYDIFF_OP_LOG;
     v->left = a;
     v->right = -1;
     v->visited = 0;
+    v->name[0] = '\0';
     return __td_graph.count++;
 }
 
@@ -193,13 +196,13 @@ int tinydiff_pow(int base, int exp_id) {
     tinydiff_var *ve = &__td_graph.vars[exp_id];
     tinydiff_var *v = &__td_graph.vars[__td_graph.count];
     v->id = __td_graph.count;
-    snprintf(v->name, TINYDIFF_NAME_LEN, "(%s^%s)", vb->name, ve->name);
     v->value = pow(vb->value, ve->value);
     v->grad = 0.0;
     v->op = TINYDIFF_OP_POW;
     v->left = base;
     v->right = exp_id;
     v->visited = 0;
+    v->name[0] = '\0';
     return __td_graph.count++;
 }
 
@@ -207,13 +210,56 @@ int tinydiff_neg(int a) {
     tinydiff_var *va = &__td_graph.vars[a];
     tinydiff_var *v = &__td_graph.vars[__td_graph.count];
     v->id = __td_graph.count;
-    snprintf(v->name, TINYDIFF_NAME_LEN, "(-%s)", va->name);
     v->value = -(va->value);
     v->grad = 0.0;
     v->op = TINYDIFF_OP_NEG;
     v->left = a;
     v->right = -1;
     v->visited = 0;
+    v->name[0] = '\0';
+    return __td_graph.count++;
+}
+
+int tinydiff_tanh(int a) {
+    tinydiff_var *va = &__td_graph.vars[a];
+    tinydiff_var *v = &__td_graph.vars[__td_graph.count];
+    v->id = __td_graph.count;
+    v->value = tanh(va->value);
+    v->grad = 0.0;
+    v->op = TINYDIFF_OP_TANH;
+    v->left = a;
+    v->right = -1;
+    v->visited = 0;
+    v->name[0] = '\0';
+    return __td_graph.count++;
+}
+
+int tinydiff_relu(int a) {
+    tinydiff_var *va = &__td_graph.vars[a];
+    tinydiff_var *v = &__td_graph.vars[__td_graph.count];
+    v->id = __td_graph.count;
+    v->value = va->value > 0.0 ? va->value : 0.0;
+    v->grad = 0.0;
+    v->op = TINYDIFF_OP_RELU;
+    v->left = a;
+    v->right = -1;
+    v->visited = 0;
+    v->name[0] = '\0';
+    return __td_graph.count++;
+}
+
+int tinydiff_sigmoid(int a) {
+    tinydiff_var *va = &__td_graph.vars[a];
+    tinydiff_var *v = &__td_graph.vars[__td_graph.count];
+    v->id = __td_graph.count;
+    double s = 1.0 / (1.0 + exp(-va->value));
+    v->value = s;
+    v->grad = 0.0;
+    v->op = TINYDIFF_OP_SIGMOID;
+    v->left = a;
+    v->right = -1;
+    v->visited = 0;
+    v->name[0] = '\0';
     return __td_graph.count++;
 }
 
@@ -221,15 +267,6 @@ static void tinydiff_clear_visited(void) {
     for (int i = 0; i < __td_graph.count; i++) {
         __td_graph.vars[i].visited = 0;
     }
-}
-
-static void tinydiff_visit(int id) {
-    if (id < 0) return;
-    tinydiff_var *v = &__td_graph.vars[id];
-    if (v->visited) return;
-    v->visited = 1;
-    tinydiff_visit(v->left);
-    tinydiff_visit(v->right);
 }
 
 static void tinydiff_backward_pass(int id) {
@@ -244,15 +281,15 @@ static void tinydiff_backward_pass(int id) {
         case TINYDIFF_OP_ADD: {
             tinydiff_var *left = &__td_graph.vars[v->left];
             tinydiff_var *right = &__td_graph.vars[v->right];
-            left->grad += 1.0 * v->grad;
-            right->grad += 1.0 * v->grad;
+            left->grad += v->grad;
+            right->grad += v->grad;
             break;
         }
         case TINYDIFF_OP_SUB: {
             tinydiff_var *left = &__td_graph.vars[v->left];
             tinydiff_var *right = &__td_graph.vars[v->right];
-            left->grad += 1.0 * v->grad;
-            right->grad += -1.0 * v->grad;
+            left->grad += v->grad;
+            right->grad += -v->grad;
             break;
         }
         case TINYDIFF_OP_MUL: {
@@ -303,7 +340,22 @@ static void tinydiff_backward_pass(int id) {
         }
         case TINYDIFF_OP_NEG: {
             tinydiff_var *left = &__td_graph.vars[v->left];
-            left->grad += -1.0 * v->grad;
+            left->grad += -v->grad;
+            break;
+        }
+        case TINYDIFF_OP_TANH: {
+            tinydiff_var *left = &__td_graph.vars[v->left];
+            left->grad += (1.0 - v->value * v->value) * v->grad;
+            break;
+        }
+        case TINYDIFF_OP_RELU: {
+            tinydiff_var *left = &__td_graph.vars[v->left];
+            left->grad += (left->value > 0.0 ? 1.0 : 0.0) * v->grad;
+            break;
+        }
+        case TINYDIFF_OP_SIGMOID: {
+            tinydiff_var *left = &__td_graph.vars[v->left];
+            left->grad += v->value * (1.0 - v->value) * v->grad;
             break;
         }
     }
@@ -346,13 +398,10 @@ double tinydiff_grad(int id) {
     return __td_graph.vars[id].grad;
 }
 
-const char* tinydiff_name(int id) {
-    return __td_graph.vars[id].name;
-}
-
 int main(void) {
     tinydiff_init();
 
+    printf("=== TEST 1: z = x*y + sin(x) + exp(y) ===\n");
     int x = tinydiff_input("x", 3.0);
     int y = tinydiff_input("y", 4.0);
     int a = tinydiff_mul(x, y);
@@ -360,12 +409,28 @@ int main(void) {
     int c = tinydiff_exp(y);
     int d = tinydiff_add(a, b);
     int z = tinydiff_add(d, c);
-
     tinydiff_backward(z);
+    printf("z = %.6f\n", tinydiff_value(z));
+    printf("dz/dx = %.6f (expected: %.6f)\n", tinydiff_grad(x), 4.0 + cos(3.0));
+    printf("dz/dy = %.6f (expected: %.6f)\n\n", tinydiff_grad(y), 3.0 + exp(4.0));
 
-    printf("z = %s = %.6f\n", tinydiff_name(z), tinydiff_value(z));
-    printf("dz/dx = %.6f\n", tinydiff_grad(x));
-    printf("dz/dy = %.6f\n", tinydiff_grad(y));
+    tinydiff_init();
+    printf("=== TEST 2: sigmoid(x) then relu ===\n");
+    int x2 = tinydiff_input("x2", 0.5);
+    int s = tinydiff_sigmoid(x2);
+    int r = tinydiff_relu(s);
+    tinydiff_backward(r);
+    printf("relu(sigmoid(%.1f)) = %.6f\n", 0.5, tinydiff_value(r));
+    printf("grad = %.6f\n\n", tinydiff_grad(x2));
+
+    tinydiff_init();
+    printf("=== TEST 3: division z = x / y ===\n");
+    int x3 = tinydiff_input("x3", 6.0);
+    int y3 = tinydiff_input("y3", 2.0);
+    int q = tinydiff_div(x3, y3);
+    tinydiff_backward(q);
+    printf("6/2 = %.6f, dx=%.6f, dy=%.6f\n",
+           tinydiff_value(q), tinydiff_grad(x3), tinydiff_grad(y3));
 
     return 0;
 }
