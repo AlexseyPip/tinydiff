@@ -1,3 +1,9 @@
+// tinydiff.c
+// Author: AlexseyPip
+// Version: 1.0
+// Description: 
+// Last Update: 14.05.2026
+
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
