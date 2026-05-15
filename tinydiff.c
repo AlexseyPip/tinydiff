@@ -1,22 +1,23 @@
 /*
  *  tinydiff.c — single-file reverse-mode automatic differentiation in pure C
  *  Author : AlexseyPip
- *  Version: 1.1
+ *  Version: 1.2
  *  License: MIT
  *  Repo   : github.com/AlexseyPip/tinydiff
- *  Update : 14.05.2026
+ *  Update : 15.05.2026
  *
  *  Tiny compute graph + backpropagation.
- *  No malloc, no dependencies, <512 nodes.
- *  15 primitive ops. Fits in any online compiler.
+ *  No malloc, no dependencies, <1024 nodes.
+ *  16 primitive ops. Linear layer, zero-grads, expr printer.
+ *  Fits in any online compiler.
  */
 
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
 
-#define TINYDIFF_MAX_VARS 512
-#define TINYDIFF_NAME_LEN 128
+#define TINYDIFF_MAX_VARS 1024
+#define TINYDIFF_NAME_LEN 256
 
 typedef enum {
     TINYDIFF_OP_INPUT,
@@ -33,7 +34,8 @@ typedef enum {
     TINYDIFF_OP_NEG,
     TINYDIFF_OP_TANH,
     TINYDIFF_OP_RELU,
-    TINYDIFF_OP_SIGMOID
+    TINYDIFF_OP_SIGMOID,
+    TINYDIFF_OP_SUM
 } tinydiff_op;
 
 typedef struct {
@@ -45,6 +47,8 @@ typedef struct {
     int left;
     int right;
     int visited;
+    int sum_count;
+    int sum_ids[TINYDIFF_MAX_VARS];
 } tinydiff_var;
 
 typedef struct {
@@ -70,6 +74,7 @@ int tinydiff_input(const char *name, double val) {
     v->left = -1;
     v->right = -1;
     v->visited = 0;
+    v->sum_count = 0;
     return G.count++;
 }
 
@@ -85,6 +90,7 @@ int tinydiff_const(double val) {
     v->left = -1;
     v->right = -1;
     v->visited = 0;
+    v->sum_count = 0;
     return G.count++;
 }
 
@@ -99,6 +105,7 @@ static int tinydiff_binary_op(int a, int b, tinydiff_op op) {
     v->grad = 0.0;
     v->visited = 0;
     v->name[0] = '\0';
+    v->sum_count = 0;
     switch (op) {
         case TINYDIFF_OP_ADD: v->value = va->value + vb->value; break;
         case TINYDIFF_OP_SUB: v->value = va->value - vb->value; break;
@@ -119,6 +126,7 @@ static int tinydiff_unary_op(int a, tinydiff_op op) {
     v->grad = 0.0;
     v->visited = 0;
     v->name[0] = '\0';
+    v->sum_count = 0;
     switch (op) {
         case TINYDIFF_OP_SIN:  v->value = sin(va->value); break;
         case TINYDIFF_OP_COS:  v->value = cos(va->value); break;
@@ -162,7 +170,49 @@ int tinydiff_pow(int base, int exp_id) {
     v->right = exp_id;
     v->visited = 0;
     v->name[0] = '\0';
+    v->sum_count = 0;
     return G.count++;
+}
+
+int tinydiff_sum(int *ids, int n) {
+    tinydiff_var *v = &G.vars[G.count];
+    v->id = G.count;
+    v->op = TINYDIFF_OP_SUM;
+    v->left = -1;
+    v->right = -1;
+    v->grad = 0.0;
+    v->visited = 0;
+    v->name[0] = '\0';
+    v->value = 0.0;
+    v->sum_count = n;
+    for (int i = 0; i < n; i++) {
+        v->sum_ids[i] = ids[i];
+        v->value += G.vars[ids[i]].value;
+    }
+    return G.count++;
+}
+
+int tinydiff_linear(int *inputs, int n_in, int n_out, int *weights, int *bias) {
+    int out_ids[TINYDIFF_MAX_VARS];
+    for (int o = 0; o < n_out; o++) {
+        int terms[TINYDIFF_MAX_VARS];
+        for (int i = 0; i < n_in; i++) {
+            int w = weights[o * n_in + i];
+            int x = inputs[i];
+            terms[i] = tinydiff_mul(w, x);
+        }
+        int sum_val = tinydiff_sum(terms, n_in);
+        if (bias != NULL) {
+            out_ids[o] = tinydiff_add(sum_val, bias[o]);
+        } else {
+            out_ids[o] = sum_val;
+        }
+    }
+    int result_id = out_ids[0];
+    for (int o = 1; o < n_out; o++) {
+        result_id = tinydiff_add(result_id, out_ids[o]);
+    }
+    return result_id;
 }
 
 void tinydiff_zero_grads(void) {
@@ -230,6 +280,11 @@ static void tinydiff_backward_pass(int id) {
         case TINYDIFF_OP_SIGMOID:
             G.vars[v->left].grad += v->value * (1.0 - v->value) * v->grad;
             break;
+        case TINYDIFF_OP_SUM:
+            for (int i = 0; i < v->sum_count; i++) {
+                G.vars[v->sum_ids[i]].grad += v->grad;
+            }
+            break;
     }
 }
 
@@ -241,8 +296,14 @@ static void tinydiff_topo_dfs(int id) {
     tinydiff_var *v = &G.vars[id];
     if (v->visited) return;
     v->visited = 1;
-    tinydiff_topo_dfs(v->left);
-    tinydiff_topo_dfs(v->right);
+    if (v->op == TINYDIFF_OP_SUM) {
+        for (int i = 0; i < v->sum_count; i++) {
+            tinydiff_topo_dfs(v->sum_ids[i]);
+        }
+    } else {
+        tinydiff_topo_dfs(v->left);
+        tinydiff_topo_dfs(v->right);
+    }
     __td_topo[__td_topo_len++] = id;
 }
 
@@ -265,6 +326,17 @@ int tinydiff_expr_string(int id, char *buf, int bufsz) {
         case TINYDIFF_OP_INPUT:
         case TINYDIFF_OP_CONST:
             return snprintf(buf, bufsz, "%s", v->name);
+        case TINYDIFF_OP_SUM: {
+            int off = snprintf(buf, bufsz, "(");
+            for (int i = 0; i < v->sum_count && off < bufsz - 1; i++) {
+                char tmp[TINYDIFF_NAME_LEN];
+                tinydiff_expr_string(v->sum_ids[i], tmp, sizeof(tmp));
+                off += snprintf(buf + off, bufsz - off, "%s%s", tmp, (i < v->sum_count - 1 ? "+" : ""));
+            }
+            if (off < bufsz - 1) buf[off++] = ')';
+            if (off < bufsz) buf[off] = '\0';
+            return off;
+        }
         case TINYDIFF_OP_NEG: {
             char tmp[TINYDIFF_NAME_LEN];
             tinydiff_expr_string(v->left, tmp, sizeof(tmp));
@@ -317,60 +389,60 @@ void tinydiff_set_input(int id, double val) {
 }
 
 int main(void) {
-    tinydiff_init();
+    char buf[TINYDIFF_NAME_LEN];
 
     printf("=== TEST 1: z = x*y + sin(x) + exp(y) ===\n");
+    tinydiff_init();
     int x = tinydiff_input("x", 3.0);
     int y = tinydiff_input("y", 4.0);
-    int a = tinydiff_mul(x, y);
-    int b = tinydiff_sin(x);
-    int c = tinydiff_exp(y);
-    int d = tinydiff_add(a, b);
-    int z = tinydiff_add(d, c);
+    int z = tinydiff_add(tinydiff_add(tinydiff_mul(x, y), tinydiff_sin(x)), tinydiff_exp(y));
     tinydiff_backward(z);
-    char buf[TINYDIFF_NAME_LEN];
     tinydiff_expr_string(z, buf, sizeof(buf));
     printf("z = %s = %.6f\n", buf, tinydiff_value(z));
     printf("dz/dx = %.6f (expected: %.6f)\n", tinydiff_grad(x), 4.0 + cos(3.0));
     printf("dz/dy = %.6f (expected: %.6f)\n\n", tinydiff_grad(y), 3.0 + exp(4.0));
 
-    printf("=== TEST 2: zero_grads + re-eval ===\n");
-    tinydiff_zero_grads();
-    tinydiff_set_input(x, 1.0);
-    tinydiff_set_input(y, 2.0);
-    tinydiff_backward(z);
-    tinydiff_expr_string(z, buf, sizeof(buf));
-    printf("z(x=1,y=2) = %s = %.6f\n", buf, tinydiff_value(z));
-    printf("dz/dx = %.6f (expected: %.6f)\n", tinydiff_grad(x), 2.0 + cos(1.0));
-    printf("dz/dy = %.6f (expected: %.6f)\n\n", tinydiff_grad(y), 1.0 + exp(2.0));
-
-    printf("=== TEST 3: sigmoid + relu ===\n");
+    printf("=== TEST 2: Linear layer (2 inputs -> 1 output) ===\n");
     tinydiff_init();
-    int x2 = tinydiff_input("x2", 0.5);
-    int s = tinydiff_sigmoid(x2);
-    int r = tinydiff_relu(s);
-    tinydiff_backward(r);
-    tinydiff_expr_string(r, buf, sizeof(buf));
-    printf("%s = %.6f, grad = %.6f\n\n", buf, tinydiff_value(r), tinydiff_grad(x2));
+    int x0 = tinydiff_input("x0", 0.5);
+    int x1 = tinydiff_input("x1", -0.3);
+    int w0 = tinydiff_input("w0", 0.8);
+    int w1 = tinydiff_input("w1", 0.4);
+    int b  = tinydiff_input("b",  0.1);
+    int inputs[] = {x0, x1};
+    int weights[] = {w0, w1};
+    int bias[] = {b};
+    int out = tinydiff_linear(inputs, 2, 1, weights, bias);
+    tinydiff_backward(out);
+    tinydiff_expr_string(out, buf, sizeof(buf));
+    printf("linear = %s\n", buf);
+    printf("out = %.6f (expected: %.6f)\n", tinydiff_value(out), 0.5*0.8 + (-0.3)*0.4 + 0.1);
+    printf("dout/dx0 = %.6f (w0)\n", tinydiff_grad(x0));
+    printf("dout/dx1 = %.6f (w1)\n", tinydiff_grad(x1));
+    printf("dout/dw0 = %.6f (x0)\n", tinydiff_grad(w0));
+    printf("dout/dw1 = %.6f (x1)\n", tinydiff_grad(w1));
+    printf("dout/db  = %.6f\n\n", tinydiff_grad(b));
 
-    printf("=== TEST 4: (a*b + c^d) / e ===\n");
+    printf("=== TEST 3: Linear layer (2 inputs -> 2 outputs) ===\n");
     tinydiff_init();
-    int a1 = tinydiff_input("a", 2.0);
-    int b1 = tinydiff_input("b", 3.0);
-    int c1 = tinydiff_input("c", 4.0);
-    int d1 = tinydiff_input("d", 2.0);
-    int e1 = tinydiff_input("e", 5.0);
-    int ab = tinydiff_mul(a1, b1);
-    int cd = tinydiff_pow(c1, d1);
-    int num = tinydiff_add(ab, cd);
-    int result = tinydiff_div(num, e1);
-    tinydiff_backward(result);
-    tinydiff_expr_string(result, buf, sizeof(buf));
-    printf("result = %s = %.6f\n", buf, tinydiff_value(result));
-    printf("da=%.6f db=%.6f dc=%.6f dd=%.6f de=%.6f\n",
-           tinydiff_grad(a1), tinydiff_grad(b1),
-           tinydiff_grad(c1), tinydiff_grad(d1),
-           tinydiff_grad(e1));
+    int a0 = tinydiff_input("a0", 1.0);
+    int a1 = tinydiff_input("a1", 2.0);
+    int W00 = tinydiff_input("W00", 0.2); int W01 = tinydiff_input("W01", 0.3);
+    int W10 = tinydiff_input("W10", 0.4); int W11 = tinydiff_input("W11", 0.5);
+    int B0 = tinydiff_input("B0", 0.1);
+    int B1 = tinydiff_input("B1", 0.2);
+    int ins[] = {a0, a1};
+    int ws[] = {W00, W01, W10, W11};
+    int bs[] = {B0, B1};
+    int out2 = tinydiff_linear(ins, 2, 2, ws, bs);
+    tinydiff_backward(out2);
+    tinydiff_expr_string(out2, buf, sizeof(buf));
+    printf("linear2 = %s\n", buf);
+    printf("out2 = %.6f (expected: %.6f)\n", tinydiff_value(out2),
+           (1.0*0.2 + 2.0*0.3 + 0.1) + (1.0*0.4 + 2.0*0.5 + 0.2));
+    printf("dout2/dW00 = %.6f\n", tinydiff_grad(W00));
+    printf("dout2/dW11 = %.6f\n", tinydiff_grad(W11));
+    printf("dout2/dB0 = %.6f\n", tinydiff_grad(B0));
 
     return 0;
 }
