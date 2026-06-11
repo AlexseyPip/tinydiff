@@ -4,9 +4,9 @@
  *  Version: 1.2
  *  License: MIT
  *  Repo   : github.com/AlexseyPip/tinydiff
- *  Update : 15.05.2026
+ *  Update : 11.06.2026
  *
- *  Tiny compute graph + backpropagation.
+ *  Tiny compute graph + backpropagation
  *  No malloc, no dependencies, <1024 nodes.
  *  16 primitive ops. Linear layer, zero-grads, expr printer.
  *  Fits in any online compiler.
