@@ -1,5 +1,5 @@
 /*
- *  tinydiff.c — single-file reverse-mode automatic differentiation in pure C
+ *  tinydiff.c — single-file reverse-mode automatic differentiation in pure C 
  *  Author : AlexseyPip
  *  Version: 1.2.1
  *  License: MIT
