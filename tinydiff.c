@@ -1,10 +1,10 @@
 /*
- *  tinydiff.c — single-file reverse-mode automatic differentiation in pure C 
+ *  tinydiff.c — single-file reverse-mode automatic differentiation in pure C
  *  Author : AlexseyPip
  *  Version: 1.2.0
  *  License: MIT
  *  Repo   : github.com/AlexseyPip/tinydiff
- *  Update : 16.08.2026
+ *  Update : 11.06.2026
  *
  *  Tiny compute graph + backpropagation.
  *  No malloc, no dependencies, <1024 nodes.
